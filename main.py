@@ -149,19 +149,44 @@ app.add_middleware(
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
-@app.get(
+@app.api_route(
     "/",
-    summary="Service info",
+    methods=["GET", "HEAD"],
+    summary="Service info / liveness probe",
     tags=["meta"],
 )
 def root() -> dict:
-    """Quick health-check + service identification."""
+    """
+    Service identification + liveness probe.
+
+    Accepts both `GET` and `HEAD` so platform health checks (Render, Fly,
+    Cloud Run, etc.) succeed regardless of which verb they use. FastAPI's
+    plain `@app.get` only handles GET → HEAD returns 405 → Render treats
+    the deploy as unhealthy and shuts it down, which is exactly what was
+    happening before this route was widened.
+    """
     return {
         "service": "FrameMaker XLIFF Translator (text only)",
         "version": app.version,
-        "endpoints": ["GET /languages", "POST /translate"],
+        "endpoints": ["GET /languages", "POST /translate", "GET /health"],
         "auth_required": bool(EXPECTED_API_KEY),
     }
+
+
+@app.api_route(
+    "/health",
+    methods=["GET", "HEAD"],
+    summary="Minimal liveness probe",
+    tags=["meta"],
+    include_in_schema=False,
+)
+def health() -> dict:
+    """
+    Dedicated liveness endpoint — returns 200 / OK without touching any
+    downstream services. Prefer this over `/` as the Render "Health Check
+    Path" because it's guaranteed never to grow heavier dependencies.
+    """
+    return {"ok": True}
 
 
 @app.get(
