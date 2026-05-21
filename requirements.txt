@@ -1,10 +1,29 @@
+# ── FastAPI service ─────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
-openai>=1.40.0
-lxml>=5.2.0
 python-dotenv>=1.0.0
 
-# Optional — auto-traces every OpenAI call if LANGFUSE_* env vars are set.
+# ── OpenAI + XLIFF text translation ─────────────────────────────────────────
+openai>=1.40.0
+lxml>=5.2.0
+
+# ── Image + PDF OCR / redraw pipeline (image_ocr_translator.py) ─────────────
+# fitz = PyMuPDF — PDF text-layer span editing + raster fallback.
+PyMuPDF>=1.24.0
+# Pillow — image open / draw / wrap / save.
+Pillow>=10.0.0
+# NumPy — pixel-math behind background sampling, alignment detection.
+numpy>=1.26.0
+# OpenCV (headless = no GTK/Qt deps) — content-aware text removal via
+# cv2.inpaint. Falls back to solid-fill if missing, so it's technically
+# optional, but every deploy should have it.
+opencv-python-headless>=4.9.0
+# langdetect — short-circuits files that are already in the target language.
+# Optional in image_ocr_translator.py but listed here so deploys are
+# deterministic.
+langdetect>=1.0.9
+
+# ── Optional — auto-traces every OpenAI call if LANGFUSE_* env vars are set.
 # Comment out if you don't want the dep.
 langfuse>=2.40.0

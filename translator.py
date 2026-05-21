@@ -37,9 +37,21 @@ from typing import Dict, List, Optional
 from lxml import etree
 
 # Langfuse-wrapped OpenAI when available; falls back to plain OpenAI.
+#
+# We catch `Exception`, not just `ImportError`, because langfuse pulls in
+# opentelemetry → requests → charset_normalizer, and that chain has been
+# known to raise `SystemError: error return without exception set` on
+# corrupted .pyc caches. A flaky tracing dependency must never take the
+# whole API down — tracing is optional, translation is not.
 try:
     from langfuse.openai import OpenAI  # type: ignore
-except ImportError:  # pragma: no cover
+except Exception as _e:  # pragma: no cover
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "langfuse.openai import failed (%s: %s) — falling back to plain OpenAI client; "
+        "tracing will be disabled for this run.",
+        type(_e).__name__, _e,
+    )
     from openai import OpenAI  # type: ignore
 
 log = logging.getLogger(__name__)

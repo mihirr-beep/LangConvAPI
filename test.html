@@ -276,6 +276,16 @@
       <input id="file" type="file" accept=".xlf,.xliff">
     </label>
     <div id="fileMeta" class="sub" style="font-size:0.82rem;color:var(--muted);"></div>
+
+    <label class="field" style="margin-top:1rem;">
+      Graphics ZIP <em style="font-weight:400;color:var(--muted);">(optional)</em>
+      <span class="hint">
+        Zip the FrameMaker <code>Graphics/</code> folder if you want referenced
+        images and PDFs translated too. Skip to translate text only.
+      </span>
+      <input id="graphicsZip" type="file" accept=".zip">
+    </label>
+    <div id="graphicsMeta" class="sub" style="font-size:0.82rem;color:var(--muted);"></div>
   </div>
 
   <!-- ─────────────────────────────────────────────────────────────────────── -->
@@ -355,6 +365,7 @@ const state = {
   languages: { ...HARDCODED_LANGUAGES },   // always populated; probed list overwrites this
   selected: new Set(),
   fileObj: null,
+  graphicsZipObj: null,
 };
 
 /* ── DOM helpers ─────────────────────────────────────────────────────────── */
@@ -362,9 +373,11 @@ const $ = (id) => document.getElementById(id);
 
 const baseInput   = $("baseUrl");
 const keyInput    = $("apiKey");
-const fileInput   = $("file");
-const fileMeta    = $("fileMeta");
-const langsDiv    = $("langs");
+const fileInput      = $("file");
+const fileMeta       = $("fileMeta");
+const graphicsInput  = $("graphicsZip");
+const graphicsMeta   = $("graphicsMeta");
+const langsDiv       = $("langs");
 const langSummary = $("langSummary");
 const goBtn       = $("goBtn");
 const goStatus    = $("goStatus");
@@ -499,6 +512,18 @@ fileInput.addEventListener("change", () => {
   updateGoBtn();
 });
 
+graphicsInput.addEventListener("change", () => {
+  state.graphicsZipObj = graphicsInput.files[0] || null;
+  if (state.graphicsZipObj) {
+    const kb = (state.graphicsZipObj.size / 1024).toFixed(1);
+    graphicsMeta.textContent = `🗂  ${state.graphicsZipObj.name} · ${kb} KB`;
+    log("info", `Graphics ZIP selected: ${state.graphicsZipObj.name} (${kb} KB)`);
+  } else {
+    graphicsMeta.textContent = "";
+    log("info", "Graphics ZIP cleared — request will be text-only.");
+  }
+});
+
 function updateGoBtn() {
   goBtn.disabled = !(state.fileObj && state.selected.size > 0);
 }
@@ -514,8 +539,16 @@ goBtn.addEventListener("click", async () => {
   const fd = new FormData();
   fd.append("file", state.fileObj, state.fileObj.name);
   fd.append("languages", [...state.selected].join(","));
+  if (state.graphicsZipObj) {
+    fd.append("graphics_zip", state.graphicsZipObj, state.graphicsZipObj.name);
+  }
 
-  log("info", `POST /translate — file=${state.fileObj.name} langs=${[...state.selected].join(",")}`);
+  const gfxLabel = state.graphicsZipObj
+    ? `+graphics=${state.graphicsZipObj.name}`
+    : "(text only)";
+  log("info",
+      `POST /translate — file=${state.fileObj.name} ${gfxLabel} ` +
+      `langs=${[...state.selected].join(",")}`);
   const t0 = performance.now();
 
   try {
