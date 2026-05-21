@@ -1,0 +1,10 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+openai>=1.40.0
+lxml>=5.2.0
+python-dotenv>=1.0.0
+
+# Optional — auto-traces every OpenAI call if LANGFUSE_* env vars are set.
+# Comment out if you don't want the dep.
+langfuse>=2.40.0

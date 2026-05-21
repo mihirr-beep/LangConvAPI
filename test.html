@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FrameMaker XLIFF Translator — Test UI</title>
+<style>
+  :root {
+    --primary:        #FF0806;
+    --primary-hover:  #D60705;
+    --primary-soft:   rgba(255, 8, 6, 0.08);
+    --bg:             #f5f7fb;
+    --card:           #ffffff;
+    --card-soft:      #fafbfd;
+    --border:         #e5e8ee;
+    --border-strong:  #cfd5df;
+    --text:           #0f172a;
+    --text-soft:      #334155;
+    --muted:          #64748b;
+    --success:        #16a34a;
+    --success-soft:   #dcfce7;
+    --danger:         #dc2626;
+    --danger-soft:    #fee2e2;
+    --warning:        #b45309;
+    --warning-soft:   #fef3c7;
+    --info:           #2563eb;
+    --info-soft:      #dbeafe;
+    --log-bg:         #0b1220;
+    --log-text:       #e2e8f0;
+    --shadow:         0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 1.5rem; }
+
+  /* ── Header ────────────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  /* ── File:// banner ────────────────────────────────────────────────────── */
+  .banner {
+    background: var(--warning-soft);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    margin-bottom: 1.25rem;
+    display: none;   /* shown via JS only when origin is file:// */
+  }
+  .banner strong { color: var(--warning); }
+  .banner code {
+    background: white; padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+    border: 1px solid rgba(180,83,9,0.25);
+  }
+  header .logo {
+    width: 38px; height: 38px; border-radius: 10px;
+    background: var(--primary); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 1.1rem;
+  }
+  header h1 {
+    font-size: 1.25rem; font-weight: 600; margin: 0;
+  }
+  header .sub {
+    font-size: 0.82rem; color: var(--muted);
+  }
+
+  /* ── Cards ─────────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem 1.4rem;
+    box-shadow: var(--shadow);
+    margin-bottom: 1rem;
+  }
+  .card h2 {
+    font-size: 0.78rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 0.85rem;
+  }
+
+  /* ── Inputs ────────────────────────────────────────────────────────────── */
+  label.field {
+    display: block;
+    font-size: 0.85rem; font-weight: 500; color: var(--text-soft);
+    margin-bottom: 0.85rem;
+  }
+  label.field:last-child { margin-bottom: 0; }
+  label.field .hint {
+    font-weight: 400; color: var(--muted); font-size: 0.78rem;
+    margin-left: 0.4rem;
+  }
+  input[type="text"], input[type="password"], input[type="file"] {
+    display: block; width: 100%; margin-top: 0.35rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--card-soft);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+  }
+  input[type="text"]:focus, input[type="password"]:focus,
+  input[type="file"]:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: white;
+  }
+
+  /* ── Language chips ────────────────────────────────────────────────────── */
+  .langs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+  }
+  @media (max-width: 720px) {
+    .langs { grid-template-columns: repeat(2, 1fr); }
+  }
+  .chip {
+    display: block;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border-strong);
+    background: var(--card-soft);
+    border-radius: 10px;
+    font-size: 0.85rem; color: var(--text);
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+    transition: background 0.1s ease, border-color 0.1s ease;
+  }
+  .chip:hover { border-color: var(--primary); }
+  .chip input { display: none; }
+  .chip.on {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    font-weight: 600;
+  }
+  .lang-summary {
+    margin-top: 0.85rem; padding: 0.55rem 0.85rem;
+    background: var(--primary-soft);
+    border: 1px solid var(--primary);
+    border-radius: 10px;
+    color: var(--text); font-size: 0.85rem;
+  }
+  .lang-summary strong { color: var(--primary); margin-right: 0.4rem; }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .row { display: flex; gap: 0.6rem; align-items: center; }
+  button {
+    appearance: none; border: none; cursor: pointer;
+    font: inherit; font-weight: 600;
+    border-radius: 10px;
+    padding: 0.65rem 1.1rem;
+    transition: transform 0.05s ease, opacity 0.1s ease;
+  }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  button.primary {
+    background: var(--primary); color: white;
+  }
+  button.primary:hover:not(:disabled) { background: var(--primary-hover); }
+  button.ghost {
+    background: var(--card-soft);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+  }
+  button.ghost:hover:not(:disabled) { border-color: var(--text-soft); }
+
+  /* ── Status pills ──────────────────────────────────────────────────────── */
+  .pill {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.8rem; font-weight: 600;
+    border: 1px solid transparent;
+  }
+  .pill.info    { background: var(--info-soft);    color: var(--info);    border-color: var(--info); }
+  .pill.success { background: var(--success-soft); color: var(--success); border-color: var(--success); }
+  .pill.warn    { background: var(--warning-soft); color: var(--warning); border-color: var(--warning); }
+  .pill.danger  { background: var(--danger-soft);  color: var(--danger);  border-color: var(--danger); }
+
+  /* ── Log panel ─────────────────────────────────────────────────────────── */
+  pre.log {
+    background: var(--log-bg);
+    color: var(--log-text);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.55;
+    margin: 0;
+    white-space: pre-wrap;
+    max-height: 280px; overflow-y: auto;
+  }
+  pre.log:empty::before {
+    content: "Logs will appear here.";
+    color: #64748b;
+  }
+  .log-info    { color: #cbd5e1; }
+  .log-warn    { color: #fbbf24; }
+  .log-error   { color: #f87171; }
+  .log-success { color: #4ade80; }
+
+  /* ── Footer ────────────────────────────────────────────────────────────── */
+  footer {
+    text-align: center; font-size: 0.75rem; color: var(--muted);
+    margin: 2rem 0 1rem;
+  }
+  a, a:visited { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">XF</div>
+    <div>
+      <h1>FrameMaker XLIFF Translator — Test UI</h1>
+      <div class="sub">A throwaway page for debugging your <code>/translate</code> endpoint before you wire it into ChatGPT.</div>
+    </div>
+  </header>
+
+  <!-- file:// banner — shown only when the page is opened directly from disk. -->
+  <div id="fileBanner" class="banner">
+    <strong>⚠ Opened from <code>file://</code></strong> — browsers block network
+    calls from <code>file://</code> origins, so this page can pick languages
+    and a file <em>but cannot reach the API</em>. To actually test translation:
+    start the server (<code>uvicorn main:app --port 8000</code>) and reopen
+    this page at <a id="bannerLink" href="#">http://localhost:8000/test</a>
+    (FastAPI serves the same HTML at that URL — same code, but properly
+    same-origin).
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>Connection</h2>
+    <label class="field">
+      API base URL
+      <span class="hint">Defaults to this page's origin. Override to test a remote deploy.</span>
+      <input id="baseUrl" type="text" placeholder="https://your-deploy.example.com">
+    </label>
+    <label class="field">
+      X-API-Key
+      <span class="hint">Leave blank if the server has no <code>API_KEY</code> configured.</span>
+      <input id="apiKey" type="password" placeholder="paste secret here (optional)">
+    </label>
+    <div class="row" style="margin-top:0.5rem;">
+      <button class="ghost" id="probeBtn" type="button">Probe /languages</button>
+      <span id="probeStatus" class="pill info" style="display:none;"></span>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>1. Upload XLIFF</h2>
+    <label class="field">
+      File
+      <span class="hint">.xlf or .xliff exported from FrameMaker.</span>
+      <input id="file" type="file" accept=".xlf,.xliff">
+    </label>
+    <div id="fileMeta" class="sub" style="font-size:0.82rem;color:var(--muted);"></div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>2. Target languages</h2>
+    <div id="langs" class="langs"></div>
+    <div id="langSummary" class="lang-summary" style="display:none;"></div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>3. Translate</h2>
+    <div class="row">
+      <button class="primary" id="goBtn" type="button" disabled>🚀  Translate</button>
+      <span id="goStatus"></span>
+    </div>
+    <div style="margin-top:0.85rem;">
+      <pre class="log" id="log"></pre>
+    </div>
+  </div>
+
+  <footer>
+    Connected to <code id="footUrl">—</code>. Swagger at <a id="docsLink" href="/docs">/docs</a>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ── State ───────────────────────────────────────────────────────────────── */
+const LS_KEY_BASE = "xliff_api_base_url";
+const LS_KEY_AUTH = "xliff_api_key";
+
+/* Hardcoded fallback so the language picker works even without a backend
+   (e.g. when this page is opened directly from disk for UI debugging).
+   Mirrors LANGUAGES in translator.py — keep these in sync. */
+const HARDCODED_LANGUAGES = {
+  "zh-CN": "Simplified Chinese (简体中文)",
+  "zh-TW": "Traditional Chinese (繁體中文)",
+  "ja":    "Japanese (日本語)",
+  "ko":    "Korean (한국어)",
+  "de":    "German (Deutsch)",
+  "fr":    "French (Français)",
+  "es":    "Spanish (Español)",
+  "ar":    "Arabic (العربية)",
+  "pt":    "Portuguese (Português)",
+  "it":    "Italian (Italiano)",
+  "vi":    "Vietnamese (Tiếng Việt)",
+  "nl":    "Dutch (Nederlands)",
+  "pl":    "Polish (Polski)",
+  "ru":    "Russian (Русский)",
+  "tr":    "Turkish (Türkçe)",
+  "sv":    "Swedish (Svenska)",
+  "da":    "Danish (Dansk)",
+  "fi":    "Finnish (Suomi)",
+  "nb":    "Norwegian (Norsk Bokmål)",
+  "cs":    "Czech (Čeština)",
+};
+
+/* Returns true if the page is loaded from the local filesystem instead of
+   served by a web server. Network requests are blocked in that case. */
+function isFileProtocol() {
+  return window.location.protocol === "file:";
+}
+
+/* Pick a sensible default API base URL. On file:// the window.location.origin
+   is the string "null" — useless for fetch — so fall back to localhost:8000
+   where the user probably has the FastAPI server running. */
+function pickDefaultBaseUrl() {
+  if (isFileProtocol()) return "http://localhost:8000";
+  const o = window.location.origin;
+  if (!o || o === "null") return "http://localhost:8000";
+  return o;
+}
+
+const state = {
+  languages: { ...HARDCODED_LANGUAGES },   // always populated; probed list overwrites this
+  selected: new Set(),
+  fileObj: null,
+};
+
+/* ── DOM helpers ─────────────────────────────────────────────────────────── */
+const $ = (id) => document.getElementById(id);
+
+const baseInput   = $("baseUrl");
+const keyInput    = $("apiKey");
+const fileInput   = $("file");
+const fileMeta    = $("fileMeta");
+const langsDiv    = $("langs");
+const langSummary = $("langSummary");
+const goBtn       = $("goBtn");
+const goStatus    = $("goStatus");
+const logEl       = $("log");
+const probeBtn    = $("probeBtn");
+const probeStatus = $("probeStatus");
+const footUrl     = $("footUrl");
+const docsLink    = $("docsLink");
+
+/* ── Settings persistence (localStorage) ──────────────────────────────────── */
+baseInput.value = localStorage.getItem(LS_KEY_BASE) || pickDefaultBaseUrl();
+keyInput.value  = localStorage.getItem(LS_KEY_AUTH) || "";
+
+/* Show the file:// warning banner if applicable, and point its link at the
+   default base URL so the user has a one-click route to the served version. */
+if (isFileProtocol()) {
+  const banner = document.getElementById("fileBanner");
+  const link   = document.getElementById("bannerLink");
+  banner.style.display = "block";
+  link.href = pickDefaultBaseUrl() + "/test";
+  link.textContent = pickDefaultBaseUrl() + "/test";
+}
+baseInput.addEventListener("change", () => {
+  localStorage.setItem(LS_KEY_BASE, baseInput.value.trim());
+  syncFooter();
+});
+keyInput.addEventListener("change", () => {
+  localStorage.setItem(LS_KEY_AUTH, keyInput.value);
+});
+
+function baseUrl() {
+  return (baseInput.value || window.location.origin).replace(/\/+$/, "");
+}
+function headers(extra = {}) {
+  const h = { ...extra };
+  const k = keyInput.value.trim();
+  if (k) h["X-API-Key"] = k;
+  return h;
+}
+function syncFooter() {
+  footUrl.textContent = baseUrl();
+  docsLink.href = baseUrl() + "/docs";
+}
+syncFooter();
+
+/* ── Logging ─────────────────────────────────────────────────────────────── */
+function log(level, msg) {
+  const cls = "log-" + (level === "warning" ? "warn" : level);
+  const ts  = new Date().toLocaleTimeString();
+  const line = document.createElement("span");
+  line.className = cls;
+  line.textContent = `[${ts}] ${msg}\n`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() { logEl.textContent = ""; }
+function setStatus(el, kind, text) {
+  el.style.display = "inline-block";
+  el.className = "pill " + kind;
+  el.textContent = text;
+}
+
+/* ── Language loading + rendering ────────────────────────────────────────── */
+async function loadLanguages() {
+  setStatus(probeStatus, "info", "Loading…");
+  try {
+    const r = await fetch(baseUrl() + "/languages", { headers: headers() });
+    if (!r.ok) {
+      setStatus(probeStatus, "danger", `HTTP ${r.status}`);
+      log("error", `GET /languages → ${r.status} ${r.statusText}`);
+      return;
+    }
+    const body = await r.json();
+    state.languages = body.languages || {};
+    renderLangs();
+    setStatus(probeStatus, "success", `${Object.keys(state.languages).length} langs ✓`);
+    log("success", `Connected to ${baseUrl()} — ${Object.keys(state.languages).length} languages available`);
+  } catch (e) {
+    setStatus(probeStatus, "danger", "Network error");
+    log("error", `GET /languages failed: ${e.message}`);
+  }
+}
+
+function renderLangs() {
+  langsDiv.innerHTML = "";
+  if (!state.languages || Object.keys(state.languages).length === 0) {
+    state.languages = { ...HARDCODED_LANGUAGES };
+  }
+  Object.entries(state.languages).forEach(([code, label]) => {
+    const lbl = document.createElement("label");
+    lbl.className = "chip" + (state.selected.has(code) ? " on" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = code;
+    cb.checked = state.selected.has(code);
+    cb.addEventListener("change", () => {
+      if (cb.checked) state.selected.add(code);
+      else state.selected.delete(code);
+      lbl.classList.toggle("on", cb.checked);
+      updateSummary();
+      updateGoBtn();
+    });
+    const span = document.createElement("span");
+    span.innerHTML = `<strong>${code}</strong> · ${label.split(" (")[0]}`;
+    lbl.appendChild(cb);
+    lbl.appendChild(span);
+    langsDiv.appendChild(lbl);
+  });
+  updateSummary();
+}
+
+function updateSummary() {
+  const n = state.selected.size;
+  if (n === 0) {
+    langSummary.style.display = "none";
+    return;
+  }
+  langSummary.style.display = "block";
+  langSummary.innerHTML =
+    `<strong>✓ ${n} selected</strong> · ${[...state.selected].join(", ")}`;
+}
+
+/* ── File selection ──────────────────────────────────────────────────────── */
+fileInput.addEventListener("change", () => {
+  state.fileObj = fileInput.files[0] || null;
+  if (state.fileObj) {
+    const kb = (state.fileObj.size / 1024).toFixed(1);
+    fileMeta.textContent = `📄 ${state.fileObj.name} · ${kb} KB`;
+    log("info", `File selected: ${state.fileObj.name} (${kb} KB)`);
+  } else {
+    fileMeta.textContent = "";
+  }
+  updateGoBtn();
+});
+
+function updateGoBtn() {
+  goBtn.disabled = !(state.fileObj && state.selected.size > 0);
+}
+
+/* ── Translate ───────────────────────────────────────────────────────────── */
+goBtn.addEventListener("click", async () => {
+  if (!state.fileObj || state.selected.size === 0) return;
+  goBtn.disabled = true;
+  goStatus.style.display = "inline-block";
+  goStatus.className = "pill info";
+  goStatus.textContent = "Translating…";
+
+  const fd = new FormData();
+  fd.append("file", state.fileObj, state.fileObj.name);
+  fd.append("languages", [...state.selected].join(","));
+
+  log("info", `POST /translate — file=${state.fileObj.name} langs=${[...state.selected].join(",")}`);
+  const t0 = performance.now();
+
+  try {
+    const r = await fetch(baseUrl() + "/translate", {
+      method: "POST",
+      headers: headers(),   // no Content-Type; browser sets multipart boundary
+      body: fd,
+    });
+    const ms = Math.round(performance.now() - t0);
+
+    if (!r.ok) {
+      let detail = `${r.status} ${r.statusText}`;
+      try {
+        const body = await r.json();
+        if (body && body.detail) detail = `${r.status} — ${body.detail}`;
+      } catch (_) { /* not JSON */ }
+      setStatus(goStatus, "danger", `Failed (${ms} ms)`);
+      log("error", `POST /translate → ${detail}`);
+      goBtn.disabled = false;
+      return;
+    }
+
+    // Success — pull the ZIP and trigger a download.
+    const cd = r.headers.get("Content-Disposition") || "";
+    const langs = r.headers.get("X-Translated-Languages") || "";
+    const m = /filename="?([^"]+)"?/i.exec(cd);
+    const downloadName = (m && m[1]) || `translated_${Date.now()}.zip`;
+
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = downloadName;
+    document.body.appendChild(a); a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+    setStatus(goStatus, "success", `✓ ${ms} ms — downloaded`);
+    log("success",
+        `Downloaded ${downloadName} (${(blob.size / 1024).toFixed(1)} KB) — ` +
+        `langs=${langs || [...state.selected].join(",")} — total ${ms} ms`);
+  } catch (e) {
+    setStatus(goStatus, "danger", "Network error");
+    log("error", `POST /translate threw: ${e.message}`);
+  } finally {
+    goBtn.disabled = !(state.fileObj && state.selected.size > 0);
+  }
+});
+
+/* ── Wire up ─────────────────────────────────────────────────────────────── */
+probeBtn.addEventListener("click", loadLanguages);
+
+/* Always render the language picker immediately using the hardcoded fallback,
+   so the user can pick languages and a file even when there's no backend
+   reachable yet. The probe just *verifies* connectivity afterwards. */
+renderLangs();
+log("info", `Loaded ${Object.keys(state.languages).length} languages from local fallback list.`);
+
+/* Auto-probe on page load — but only when we're served over http/https.
+   On file:// the probe is guaranteed to fail (browser blocks the fetch); no
+   point showing a scary red status the user can't act on. */
+if (!isFileProtocol()) {
+  loadLanguages();
+} else {
+  log("warning",
+      "Page opened from file:// — network probe skipped. Open the page via " +
+      "the running server (http://localhost:8000/test) to test the API.");
+}
+</script>
+</body>
+</html>

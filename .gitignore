@@ -1,0 +1,92 @@
+# ── Secrets / env files ──────────────────────────────────────────────────────
+# These hold OPENAI_API_KEY, LANGFUSE_*, etc. — never commit them.
+.env
+.env.local
+.env.*.local
+*.env.local
+chatgpt_api/.env
+# Allow the templates so fresh clones know what to fill in.
+!.env.example
+!*/.env.example
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python build artefacts
+build/
+dist/
+*.whl
+
+# ── Translation pipeline outputs (CLI + standalone scripts) ──────────────────
+# Strict-layout output folder produced by translate_xliff_openai_2.py
+translated_*/
+# Legacy per-XLF Graphics_<lang>/ folders from older versions
+Graphics_*/
+# Translation resume checkpoints (.xlf + .checkpoint.json sidecar)
+*.checkpoint.json
+# Safety-review xlsx exports — useful for human review, not for source control
+*_safety_review.xlsx
+# Deliverable ZIPs produced by the CLI
+translated_*.zip
+
+# ── Source graphics ──────────────────────────────────────────────────────────
+# Customer-supplied PDFs / PNGs / JPGs vary per project and may be
+# confidential. Track only the folder marker + README so fresh clones see
+# the expected layout but no proprietary content.
+Data/Graphics/*
+!Data/Graphics/.gitkeep
+!Data/Graphics/README.md
+
+# ── Node / Vite / React (legacy frontend, if ever reintroduced) ──────────────
+node_modules/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ── Docker / runtime data ────────────────────────────────────────────────────
+storage/         # legacy FastAPI+Postgres bind mount from the older stack
+tmp/
+temp/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Databases ────────────────────────────────────────────────────────────────
+*.sqlite3
+*.db
+
+# ── IDE / editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── OS junk ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
