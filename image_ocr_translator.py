@@ -1077,8 +1077,9 @@ def process_xlf_references(
         print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
         abs_path = found_src_path
 
-        sub = _subfolder_from_di(di_fs)
-        dest_folder = out_folder / sub
+        # THE FOLDER FLATTENING FIX: Do not append `sub` path from old document.
+        # Save straight into the single generated graphics destination.
+        dest_folder = out_folder
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
@@ -1101,16 +1102,8 @@ def process_xlf_references(
                 continue
 
             # THE DEPLOYMENT PATH FIX:
-            # We explicitly construct the path that FrameMaker expects on Windows.
-            # Regardless of where this code executes (Cloud container or Local desktop),
-            # this explicitly traverses out of `translated_de/translated_de` into `graphics/graphics`.
-            if sub and str(sub) != '.':
-                mif_ref = f"../graphics/graphics/{sub.as_posix()}/{new_name}"
-            else:
-                mif_ref = f"../graphics/graphics/{new_name}"
-
-            # Clean duplicate slash variations
-            mif_ref = mif_ref.replace("//", "/")
+            # We strictly point to the single flattened graphics folder
+            mif_ref = f"../graphics/{new_name}"
 
             print(f"  Processed Link Saved Successfully")
             print(f"  MIF Rebuilt Reference Path Written: {mif_ref!r}")
