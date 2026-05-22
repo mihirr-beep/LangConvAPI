@@ -23,17 +23,17 @@ from image_ocr_translator import (
 
 log = logging.getLogger(__name__)
 
-# Helper to ensure logging is always available in any function
 def _log_fn(msg: str, level: str = "info", on_log: Optional[Callable] = None):
     if on_log:
         on_log(msg, level)
     else:
         getattr(log, level, log.info)(msg)
 
+# THE FIX: Match both regular and 'DI' (Device Independent) FrameMaker reference tags
 _OB_RE = re.compile(
-    r'(<(?:[A-Za-z_][\w\-]*:)?ImportObFile\b[^>]*>)'
+    r'(<(?:[A-Za-z_][\w\-]*:)?ImportObFile(?:DI)?\b[^>]*>)'
     r'([^<]+)'
-    r'(</(?:[A-Za-z_][\w\-]*:)?ImportObFile>)',
+    r'(</(?:[A-Za-z_][\w\-]*:)?ImportObFile(?:DI)?>)',
     re.IGNORECASE,
 )
 
@@ -42,7 +42,6 @@ def update_xlf_references(
     path_mapping: Dict[str, str],
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> int:
-    # Use the helper to avoid 'not defined' errors
     def local_log(msg, level="info"): return _log_fn(msg, level, on_log)
 
     if not path_mapping:
@@ -51,7 +50,9 @@ def update_xlf_references(
 
     filename_to_new: Dict[str, str] = {}
     for old_key, new_path in path_mapping.items():
+        # THE FIX: Double unescape to handle FrameMaker's &amp;auml; -> &auml; -> ä translations
         decoded_key = html.unescape(old_key.strip())
+        decoded_key = html.unescape(decoded_key)
         decoded_key = urllib.parse.unquote(decoded_key)
         decoded_key = decoded_key.replace("<u>", "/").replace("<c>", "/")
         bn = Path(decoded_key.replace("\\", "/")).name
@@ -86,11 +87,15 @@ def update_xlf_references(
         return 0
 
     rewrite_count = 0
+    miss_samples: list = []
+
     def _replace(match: re.Match) -> str:
         nonlocal rewrite_count
         head, current, tail = match.group(1), match.group(2), match.group(3)
         
+        # Unescape current string to find the true baseline file name
         decoded = html.unescape(current.strip())
+        decoded = html.unescape(decoded)
         decoded = urllib.parse.unquote(decoded)
         decoded = decoded.replace("<u>", "/").replace("<c>", "/")
         decoded = decoded.replace("\\", "/").replace(":", "/")
@@ -101,10 +106,29 @@ def update_xlf_references(
             if bn_current.lower() == bn.lower():
                 rewrite_count += 1
                 return f"{head}{new_path}{tail}"
+        
+        if len(miss_samples) < 10:
+            miss_samples.append(current)
         return match.group(0)
 
     new_mif = _OB_RE.sub(_replace, mif_str)
     
+    local_log(
+        f"Rewrote {rewrite_count} <ImportObFile> reference(s) in MIF blob",
+        "info" if rewrite_count else "warning",
+    )
+
+    if rewrite_count == 0:
+        local_log("  No rewrites fired — dumping <ImportObFile> samples:", "warning")
+        for i, m in enumerate(_OB_RE.finditer(mif_str)):
+            if i >= 10:
+                break
+            local_log(f"    [{i}] {m.group(2)!r}", "warning")
+        local_log("  Available basenames:", "warning")
+        for bn in filename_to_new:
+            local_log(f"    {bn!r}", "warning")
+        return 0
+
     raw = new_mif.encode("utf-8", errors="replace")
     if was_gzip:
         raw = gzip.compress(raw)
@@ -121,7 +145,6 @@ def translate_project(
     graphics_source_dir: Optional[Path] = None,
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> Path:
-    # Use the helper to avoid 'not defined' errors
     def local_log(msg, level="info"): return _log_fn(msg, level, on_log)
 
     work_dir = Path(work_dir)
