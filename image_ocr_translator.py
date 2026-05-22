@@ -929,22 +929,6 @@ def process_xlf_references(
     out_xlf_path: Optional[Path] = None,
     src_graphics_folder: Optional[Path] = None,
 ) -> Dict[str, str]:
-    """
-    Translate every graphic referenced inside `xlf_path`'s embedded MIF blob
-    and return a {key → new-relative-path} mapping ready for the rewriter.
-
-    Lookup hierarchy (per reference):
-      1. Source basename joined to the DI-derived subfolder under `src_graphics_folder`
-      2. Source basename joined to the root of `src_graphics_folder`
-      3. Recursive `rglob(basename)` anywhere inside `src_graphics_folder`
-
-    Output:
-      Translated assets are written to `<out_folder>/<DI-derived-subfolder>/`.
-      The mapping value (what becomes the new <ImportObFile> value) is the
-      relative path from `out_xlf_path.parent` to the saved file. From the
-      strict layout `<root>/translated_<lang>/<file>.xlf` to
-      `<root>/graphics/graphics/<file>` that's `../graphics/graphics/<file>`.
-    """
     xlf_path = Path(xlf_path)
     base_dir = xlf_path.parent
 
@@ -954,7 +938,7 @@ def process_xlf_references(
         xlf_out_dir = Path(out_xlf_path).parent
 
     print(f"\n{'='*60}")
-    print(f"  process_xlf_references")
+    print(f"  process_xlf_references (API Mode)")
     print(f"  XLF      : {xlf_path}")
     print(f"  Target   : {target_lang}")
     print(f"  XLF out dir: {xlf_out_dir}")
@@ -978,24 +962,26 @@ def process_xlf_references(
 
     for di_raw, abs_path_str in refs:
         abs_path = Path(abs_path_str)
-        di_fs    = _parse_mif_path(di_raw)
+        di_fs    = _parse_mif_path(di_raw)      
         print(f"\n  File     : {abs_path.name}")
         print(f"  DI path  : {di_fs!r}")
 
-        # Lookup strategy: prefer subfolder-anchored, then root, then rglob.
         found_src_path = None
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
             sub = _subfolder_from_di(di_fs)
-
+            
+            # Check 1: Tree directory structure match (Graphics/Graphics/image.jpg)
             c1 = src_g_root / sub / abs_path.name
             if c1.is_file():
                 found_src_path = c1
             else:
+                # Check 2: Direct match inside root of uploaded archive
                 c2 = src_g_root / abs_path.name
                 if c2.is_file():
                     found_src_path = c2
                 else:
+                    # Check 3: Recursive fallback match
                     for match in src_g_root.rglob(abs_path.name):
                         if match.is_file():
                             found_src_path = match
@@ -1031,18 +1017,24 @@ def process_xlf_references(
             if not new_name:
                 continue
 
-            saved_abs = dest_folder / new_name
+            # THE DEPLOYMENT PATH FIX:
+            # Reconstruct the strict directory traversal standard.
+            # Your XLIFF sits at: translated_de/translated_de/file.xlf
+            # To go up one level out of 'translated_de/' and enter the graphics sibling folder:
+            if sub and str(sub) != '.':
+                mif_ref = f"../graphics/graphics/{sub.as_posix()}/{new_name}"
+            else:
+                mif_ref = f"../graphics/graphics/{new_name}"
 
-            # Relative path from the (nested) XLF directory out to the saved
-            # asset — this is what FrameMaker walks on re-import.
-            mif_ref = os.path.relpath(str(saved_abs), str(xlf_out_dir)).replace(os.sep, "/")
+            # Clean duplicate slash variations
+            mif_ref = mif_ref.replace("//", "/")
 
-            print(f"  Saved  → {saved_abs}")
-            print(f"  MIF ref: {mif_ref!r}")
+            print(f"  Processed Link Saved Successfully")
+            print(f"  MIF Rebuilt Reference Path Written: {mif_ref!r}")
 
-            mapping[abs_path.name]   = mif_ref
-            mapping[di_fs]           = mif_ref
-            mapping[di_raw]          = mif_ref
+            mapping[abs_path.name]   = mif_ref   
+            mapping[di_fs]           = mif_ref   
+            mapping[di_raw]          = mif_ref   
 
         except Exception as e:
             print(f"  ✗ Error on {abs_path.name}: {e}")
