@@ -37,6 +37,11 @@ caller receives a deliverable folder containing only the translated XLF
 under `<root>/translated_<lang>/`, with the original MIF refs untouched.
 """
 
+# pipeline.py
+"""
+High-level orchestrator: text + graphics + reference rewrite, all in one call.
+"""
+
 from __future__ import annotations
 
 import base64
@@ -56,61 +61,30 @@ from image_ocr_translator import (
 
 log = logging.getLogger(__name__)
 
-
-# ── Reference rewriter ───────────────────────────────────────────────────────
-# Same logic as src/translation/references.py:update_xlf_references in the
-# Streamlit pipeline. Kept inline here so the FastAPI service has zero
-# dependency on the `src/` package.
-
-# Match <ImportObFile>…</ImportObFile> tolerating an XML namespace prefix.
 _OB_RE = re.compile(
     r"(<(?:[A-Za-z_][\w\-]*:)?ImportObFile\b[^>]*>)"
     r"([^<]+)"
-    r"(</(?:[A-Za-z_][\w\-]*:)?ImportObFile>)",
+    r"(</?:[A-Za-z_][\w\-]*:)?ImportObFile>",
     re.IGNORECASE,
 )
-
 
 def update_xlf_references(
     xlf_path: Path,
     path_mapping: Dict[str, str],
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> int:
-    """
-    Rewrite <ImportObFile> values inside the XLF's embedded MIF blob so they
-    point at where the translated graphics actually got written.
-
-    Algorithm
-    ─────────
-    1. Collapse path_mapping (which may have multiple keys — basename, di_fs,
-       di_raw — pointing at the same new path) down to {basename: new_path}.
-    2. Base64-decode + gunzip the <internal-file> blob.
-    3. For every <ImportObFile> in the MIF, normalise its current value's
-       separators (\\, :, /) and check whether it ENDS WITH any known
-       basename. If yes, replace the entire value with the new path — no
-       substring patching (which produces mangled paths like
-       "../Graphics/../graphics/graphics/x.pdf").
-    4. Re-gzip + base64-encode, write the XLF back.
-
-    <ImportObFileDI> is NEVER rewritten — that's the device-independent
-    original path FrameMaker uses to track the asset's identity. Touching
-    it breaks round-tripping back into FM.
-    """
     log_fn = on_log or (lambda msg, level="info": getattr(log, level, log.info)(msg))
 
     if not path_mapping:
         log_fn("update_xlf_references: empty mapping; nothing to do", "warning")
         return 0
 
-    # Collapse {basename, di_fs, di_raw} keys → one entry per new filename.
     filename_to_new: Dict[str, str] = {}
     for new_path in set(path_mapping.values()):
         bn = Path(new_path.replace("\\", "/")).name
         filename_to_new[bn] = new_path
 
     log_fn(f"Rewrite plan: {len(filename_to_new)} filename(s)")
-    for bn, np in filename_to_new.items():
-        log_fn(f"  • {bn}  →  {np}")
 
     parser = etree.XMLParser(remove_blank_text=False, recover=True)
     tree   = etree.parse(str(xlf_path), parser)
@@ -145,10 +119,14 @@ def update_xlf_references(
     def _replace(match: re.Match) -> str:
         nonlocal rewrite_count
         head, current, tail = match.group(1), match.group(2), match.group(3)
+        
+        # Normalize target file references safely
         norm = current.replace("\\", "/").replace(":", "/")
+        norm_bn = norm.split("/")[-1] if "/" in norm else norm
+
         for bn, new_path in filename_to_new.items():
-            if norm == bn or norm.endswith("/" + bn):
-                log_fn(f"  ✓ {current!r} → {new_path!r}  (matched {bn!r})")
+            if norm_bn == bn or norm.endswith("/" + bn):
+                log_fn(f"  ✓ {current!r} → {new_path!r}")
                 rewrite_count += 1
                 return f"{head}{new_path}{tail}"
         if len(miss_samples) < 10:
@@ -156,21 +134,7 @@ def update_xlf_references(
         return match.group(0)
 
     new_mif = _OB_RE.sub(_replace, mif_str)
-    log_fn(
-        f"Rewrote {rewrite_count} <ImportObFile> reference(s) in MIF blob",
-        "info" if rewrite_count else "warning",
-    )
-
-    if rewrite_count == 0:
-        log_fn("  No rewrites fired — dumping <ImportObFile> samples:", "warning")
-        for i, m in enumerate(_OB_RE.finditer(mif_str)):
-            if i >= 10:
-                break
-            log_fn(f"    [{i}] {m.group(2)!r}", "warning")
-        log_fn("  Available basenames:", "warning")
-        for bn in filename_to_new:
-            log_fn(f"    {bn!r}", "warning")
-        return 0
+    log_fn(f"Rewrote {rewrite_count} <ImportObFile> reference(s) in MIF blob")
 
     raw = new_mif.encode("utf-8", errors="replace")
     if was_gzip:
@@ -180,8 +144,6 @@ def update_xlf_references(
     tree.write(str(xlf_path), encoding="utf-8", xml_declaration=True)
     return rewrite_count
 
-
-# ── Orchestrator ─────────────────────────────────────────────────────────────
 def translate_project(
     xlf_bytes: bytes,
     xlf_filename: str,
@@ -190,50 +152,15 @@ def translate_project(
     graphics_source_dir: Optional[Path] = None,
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> Path:
-    """
-    Run the full text + graphics pipeline for ONE language and return the
-    absolute path to the assembled deliverable folder (which the caller
-    should zip and stream to the client).
-
-    Parameters
-    ──────────
-    xlf_bytes
-        Raw uploaded .xlf / .xliff bytes.
-    xlf_filename
-        Original filename — used for the stem of the translated file. The
-        suffix is preserved (`.xlf` or `.xliff`).
-    target_lang
-        Language code (must be a key of translator.LANGUAGES).
-    work_dir
-        A working directory that the caller owns. The deliverable folder is
-        created at `<work_dir>/translated_<lang>/`.
-    graphics_source_dir
-        Root of the unpacked Graphics folder the user uploaded. May contain
-        the files at the top level, inside a `Graphics/` subfolder, or
-        anywhere nested — the lookup inside `process_xlf_references` uses
-        three strategies (subfolder-anchored, root-anchored, recursive
-        rglob) so the structure doesn't need to be normalised here. Pass
-        None to skip all graphics work (text-only translation).
-    on_log
-        Optional `(msg, level) -> None` sink for progress logs. Defaults
-        to the module logger.
-
-    Returns
-    ───────
-    Path
-        Absolute path to `<work_dir>/translated_<lang>/`. Contains:
-            graphics/graphics/<subfolder>/<file>     (only if graphics_source_dir given)
-            translated_<lang>/<stem>_<lang>.xlf
-    """
     log_fn = on_log or (lambda msg, level="info": getattr(log, level, log.info)(msg))
 
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # Strict layout: translated_<lang>/{graphics/graphics/, translated_<lang>/}
     deliverable_root = work_dir / f"translated_{target_lang}"
     xlf_out_dir      = deliverable_root / f"translated_{target_lang}"
     graphics_out_dir = deliverable_root / "graphics" / "graphics"
+    
     xlf_out_dir.mkdir(parents=True, exist_ok=True)
     if graphics_source_dir is not None:
         graphics_out_dir.mkdir(parents=True, exist_ok=True)
@@ -243,47 +170,33 @@ def translate_project(
     if ext.lower() not in {".xlf", ".xliff"}:
         ext = ".xlf"
 
-    # ── 1. Text translation ──────────────────────────────────────────────────
     log_fn(f"[{target_lang}] translating text segments…")
     translated_bytes = translate_xliff_bytes(xlf_bytes, target_lang=target_lang)
 
     out_xlf_path = xlf_out_dir / f"{stem}_{target_lang}{ext}"
     out_xlf_path.write_bytes(translated_bytes)
-    log_fn(f"[{target_lang}] text done → {out_xlf_path.relative_to(work_dir)}")
+    log_fn(f"[{target_lang}] text done")
 
-    # ── 2. Graphics processing (optional) ────────────────────────────────────
     if graphics_source_dir is None:
         log_fn(f"[{target_lang}] no graphics folder supplied — skipping image OCR")
         return deliverable_root
 
     graphics_source_dir = Path(graphics_source_dir)
-    if not graphics_source_dir.is_dir():
-        log_fn(
-            f"[{target_lang}] graphics_source_dir not a directory: "
-            f"{graphics_source_dir} — skipping image OCR",
-            "warning",
-        )
-        return deliverable_root
-
     log_fn(f"[{target_lang}] processing graphics from {graphics_source_dir}…")
+    
     mapping = process_xlf_references(
-        xlf_path=out_xlf_path,                       # MIF blob is identical in input/output XLF
+        xlf_path=out_xlf_path,
         target_lang=target_lang,
-        out_folder=graphics_out_dir,                 # → <root>/graphics/graphics/
-        rename_with_lang=False,                       # keep original filenames
-        out_xlf_path=out_xlf_path,                   # relpath anchor for new MIF refs
+        out_folder=graphics_out_dir,
+        rename_with_lang=False,
+        out_xlf_path=out_xlf_path,
         src_graphics_folder=graphics_source_dir,
     )
 
     if not mapping:
-        log_fn(
-            f"[{target_lang}] no graphics translated "
-            "(either no <ImportObFileDI> entries or no matching files found)",
-            "warning",
-        )
+        log_fn(f"[{target_lang}] no graphics translated", "warning")
         return deliverable_root
 
-    # ── 3. Rewrite MIF refs in the translated XLF ────────────────────────────
     log_fn(f"[{target_lang}] rewriting MIF references in translated XLF…")
     n = update_xlf_references(out_xlf_path, mapping, on_log=on_log)
     log_fn(f"[{target_lang}] graphics done — {n} reference(s) rewritten")
