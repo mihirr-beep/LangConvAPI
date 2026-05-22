@@ -132,6 +132,9 @@ def update_xlf_references(
     tree.write(str(xlf_path), encoding="utf-8", xml_declaration=True)
     return rewrite_count
 
+# [Copy/Paste this into pipeline.py]
+# Update the deliverable path construction in translate_project:
+
 def translate_project(
     xlf_bytes: bytes,
     xlf_filename: str,
@@ -140,15 +143,17 @@ def translate_project(
     graphics_source_dir: Optional[Path] = None,
     on_log: Optional[Callable[[str, str], None]] = None,
 ) -> Path:
-    log_fn = on_log or (lambda msg, level="info": getattr(log, level, log.info)(msg))
-
     work_dir = Path(work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
-
     deliverable_root = work_dir / f"translated_{target_lang}"
-    xlf_out_dir      = deliverable_root / f"translated_{target_lang}"
+    
+    # Structure: translated_de/translated_de/ (for XLF) and translated_de/graphics/ (for images)
+    xlf_out_dir = deliverable_root / f"translated_{target_lang}"
     graphics_out_dir = deliverable_root / "graphics"
     
+    xlf_out_dir.mkdir(parents=True, exist_ok=True)
+    graphics_out_dir.mkdir(parents=True, exist_ok=True)
+
+    # ... [rest of the function remains the same] ...    
     xlf_out_dir.mkdir(parents=True, exist_ok=True)
     if graphics_source_dir is not None:
         graphics_out_dir.mkdir(parents=True, exist_ok=True)
