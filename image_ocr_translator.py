@@ -809,7 +809,7 @@ def process_pdf(
     return new_name
 
 _DI_RE = re.compile(
-    r'<ImportObFileDI[^>]*>([^<]+)</ImportObFileDI>',
+    r'<(?:[A-Za-z_][\w\-]*:)?ImportObFile(?:DI)?\b[^>]*>([^<]+)</(?:[A-Za-z_][\w\-]*:)?ImportObFile(?:DI)?>',
     re.IGNORECASE,
 )
 
@@ -819,7 +819,10 @@ _OB_RE = re.compile(
 )
 
 def _parse_mif_path(raw_di: str) -> str:
+    # THE FIX: Double unescape handles &amp;auml; -> &auml; -> ä
     decoded   = html.unescape(raw_di.strip())
+    decoded   = html.unescape(decoded)
+    decoded   = unquote(decoded)
     converted = decoded.replace("<u>", "../").replace("<c>", "/")
     converted = converted.replace("..//" , "../")   
     return converted
@@ -872,7 +875,7 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
     base_dir = xlf_path.parent
     di_raws  = _DI_RE.findall(mif)
 
-    print(f"  ImportObFileDI entries found: {len(di_raws)}")
+    print(f"  ImportObFile entries found: {len(di_raws)}")
     if not di_raws:
         print("  [WARN] No <ImportObFileDI> entries in MIF.")
         return []
@@ -882,9 +885,8 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
 
     for raw in di_raws:
         fs_path_str = _parse_mif_path(raw)
-        ext         = Path(fs_path_str).suffix.lower()
-
-        # REMOVED EXTENSION STRICT CHECK to guarantee every file is mapped
+        
+        # THE FIX: Removed extension block check so files like .pd get picked up blindly
         abs_path = (base_dir / fs_path_str).resolve()
         key      = str(abs_path)
 
@@ -896,114 +898,6 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
 
     return result
 
-def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
-    result  = []
-    pos     = 0
-    updated = 0
-
-    for di_match in _DI_RE.finditer(mif_text):
-        di_raw = di_match.group(1)          
-
-        decoded   = html.unescape(di_raw.strip())
-        converted = decoded.replace("<u>", "../").replace("<c>", "/").replace("..//" , "../")
-        basename  = Path(converted).name
-
-        new_path = (
-            mapping.get(di_raw)    or   
-            mapping.get(basename)  or   
-            mapping.get(converted)      
-        )
-        if not new_path:
-            continue
-
-        ob_match = _OB_RE.search(mif_text, di_match.end(), di_match.end() + 800)
-        if ob_match is None:
-            continue
-
-        old_val = ob_match.group(2).strip()
-        if old_val == "2.0 internal inset":
-            continue          
-
-        result.append(mif_text[pos : ob_match.start(2)])
-        result.append(new_path)
-        pos = ob_match.end(2)
-        updated += 1
-        print(f"    MIF: {old_val!r}  →  {new_path!r}")
-
-    result.append(mif_text[pos:])
-    return "".join(result), updated
-
-def _rebuild_xlf_with_updated_paths(
-    xlf_path: Path,
-    mapping: Dict[str, str],
-    out_xlf_path: Path,
-) -> bool:
-    parser = etree.XMLParser(remove_blank_text=False, recover=True)
-    try:
-        tree = etree.parse(str(xlf_path), parser)
-    except Exception as e:
-        print(f"  ✗ Cannot parse XLF for rebuild: {e}")
-        return False
-
-    internal_el = None
-    for elem in tree.getroot().iter():
-        if elem.tag.split("}")[-1] == "internal-file":
-            internal_el = elem
-            break
-
-    if internal_el is None:
-        print("  ✗ No <internal-file> element found — cannot update XLF.")
-        return False
-
-    raw_b64 = (internal_el.text or "").strip()
-    if not raw_b64:
-        print("  ✗ <internal-file> is empty.")
-        return False
-
-    try:
-        compressed = base64.b64decode(raw_b64)
-        mif_text   = gzip.decompress(compressed).decode("utf-8", errors="replace")
-    except Exception as e:
-        print(f"  ✗ Blob decode failed: {e}")
-        return False
-
-    print("\n  Rewriting <ImportObFile> paths in MIF blob …")
-    updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
-
-    if n_updated == 0:
-        print("  [WARN] No <ImportObFile> entries were updated.")
-        print("         Check that the mapping keys match what is in the MIF.")
-        print("         Mapping keys:", list(mapping.keys())[:6])
-
-    new_compressed        = gzip.compress(updated_mif.encode("utf-8"))
-    internal_el.text      = base64.b64encode(new_compressed).decode("ascii")
-
-    out_xlf_path.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(
-        str(out_xlf_path),
-        xml_declaration=True,
-        encoding="UTF-8",
-        pretty_print=False,
-    )
-    print(f"  ✓ Updated XLF saved → {out_xlf_path}")
-    print(f"    ({n_updated} graphic reference(s) rewritten)")
-    return True
-
-def _subfolder_from_di(di_fs_path: str) -> Path:
-    p = Path(di_fs_path)
-    skip = {'..', '.', '', '/', '\\'}
-    real_parts = [
-        part for part in p.parent.parts
-        if part not in skip
-        and not (len(part) == 3 and part[1] == ':')  
-    ]
-    if not real_parts:
-        return Path('.')
-    return Path(*real_parts)
-
-# [Copy/Paste this into image_ocr_translator.py]
-# I have updated the process_xlf_references function below specifically for your path requirements.
-
 def process_xlf_references(
     xlf_path,
     target_lang: str,
@@ -1014,54 +908,91 @@ def process_xlf_references(
     src_graphics_folder: Optional[Path] = None,
 ) -> Dict[str, str]:
     xlf_path = Path(xlf_path)
-    # The XLIFF is in: .../translated_de/translated_de/
-    xlf_out_dir = Path(out_xlf_path).parent
-    # The target graphics folder should be: .../translated_de/graphics/
-    graphics_dest_dir = xlf_out_dir.parent / "graphics"
-    graphics_dest_dir.mkdir(parents=True, exist_ok=True)
+    base_dir = xlf_path.parent
+
+    if out_xlf_path is None:
+        xlf_out_dir = base_dir
+    else:
+        xlf_out_dir = Path(out_xlf_path).parent
+
+    print(f"\n{'='*60}")
+    print(f"  process_xlf_references (API Mode)")
+    print(f"  XLF      : {xlf_path}")
+    print(f"  Target   : {target_lang}")
+    print(f"  XLF out dir: {xlf_out_dir}")
+    print(f"{'='*60}")
 
     refs = extract_reference_paths(xlf_path)
+    print(f"\n  Total unique graphic refs: {len(refs)}")
+
+    if not refs:
+        print("  Nothing to process.")
+        return {}
+
+    if out_folder is None:
+        out_folder = base_dir / f"Graphics_{target_lang}"
+    out_folder = Path(out_folder)
+
+    print(f"  Output root  : {out_folder}")
+    print(f"  Lang suffix  : {rename_with_lang}\n")
+
     mapping: Dict[str, str] = {}
 
     for di_raw, abs_path_str in refs:
         abs_path = Path(abs_path_str)
         di_fs    = _parse_mif_path(di_raw)      
+        print(f"\n  File     : {abs_path.name}")
+        print(f"  DI path  : {di_fs!r}")
 
         found_src_path = None
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
+            
+            # Check safely for case-insensitive matches due to FrameMaker parsing
             for match in src_g_root.rglob("*"):
                 if match.is_file() and match.name.lower() == abs_path.name.lower():
                     found_src_path = match
                     break
-        
+
         if not found_src_path:
+            print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
             continue
 
+        print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
         abs_path = found_src_path
-        
-        # Output directly to the single 'graphics' folder
-        dest_folder = graphics_dest_dir
+
+        dest_folder = out_folder
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
+        new_name = abs_path.name if not rename_with_lang else f"{abs_path.stem}_{target_lang}{abs_path.suffix}"
+
         try:
             if ext in IMAGE_EXTENSIONS:
                 new_name = process_image(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             elif ext in PDF_EXTENSIONS:
                 new_name = process_pdf(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             else:
-                new_name = abs_path.name
-                shutil.copy2(str(abs_path), str(dest_folder / new_name))
+                print(f"  - Unsupported extension {ext} — copying unchanged.")
+                out_path = dest_folder / new_name
+                shutil.copy2(str(abs_path), str(out_path))
 
-            # FIXED REFERENCE PATH: strictly ../graphics/filename
+            # THE FIX: Create explicit relative reference out of `translated_de` into `graphics`
             mif_ref = f"../graphics/{new_name}"
-            
-            mapping[abs_path.name] = mif_ref   
-            mapping[di_fs]         = mif_ref   
-            mapping[di_raw]        = mif_ref   
+
+            print(f"  Processed Link Saved Successfully")
+            print(f"  MIF Rebuilt Reference Path Written: {mif_ref!r}")
+
+            mapping[abs_path.name]   = mif_ref   
+            mapping[di_fs]           = mif_ref   
+            mapping[di_raw]          = mif_ref   
 
         except Exception as e:
             print(f"  ✗ Error on {abs_path.name}: {e}")
 
+    print(f"\n{'='*60}")
+    print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")
+    print(f"{'='*60}")
+
+    print()
     return mapping
