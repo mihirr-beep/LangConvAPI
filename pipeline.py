@@ -83,7 +83,7 @@ def update_xlf_references(
         nonlocal rewrite_count
         head, current, tail = match.group(1), match.group(2), match.group(3)
         
-        # THE FIX: Decode FrameMaker's internal <u> and <c> tags to correctly extract the basename
+        # Decode FrameMaker's internal <u> and <c> tags to correctly extract the basename
         decoded = html.unescape(current.strip())
         decoded = decoded.replace("<u>", "/").replace("<c>", "/")
         decoded = decoded.replace("\\", "/").replace(":", "/")
@@ -94,8 +94,6 @@ def update_xlf_references(
             if bn_current == bn:
                 log_fn(f"  ✓ {current!r} → {new_path!r}  (matched {bn!r})")
                 rewrite_count += 1
-                
-                # Replace the old <c> encoded path with our strictly formatted relative path
                 return f"{head}{new_path}{tail}"
         
         if len(miss_samples) < 10:
@@ -140,9 +138,10 @@ def translate_project(
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # THE FOLDER STRUCTURE FIX: strictly creates a single 'graphics' directory
     deliverable_root = work_dir / f"translated_{target_lang}"
     xlf_out_dir      = deliverable_root / f"translated_{target_lang}"
-    graphics_out_dir = deliverable_root / "graphics" / "graphics"
+    graphics_out_dir = deliverable_root / "graphics"
     
     xlf_out_dir.mkdir(parents=True, exist_ok=True)
     if graphics_source_dir is not None:
