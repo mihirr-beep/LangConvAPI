@@ -9,6 +9,7 @@ import gzip
 import html
 import logging
 import re
+import urllib.parse
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -40,9 +41,13 @@ def update_xlf_references(
         log_fn("update_xlf_references: empty mapping; nothing to do", "warning")
         return 0
 
+    # THE FIX: Safely construct the filename mapping even if the path contains native FrameMaker tags
     filename_to_new: Dict[str, str] = {}
-    for new_path in set(path_mapping.values()):
-        bn = Path(new_path.replace("\\", "/")).name
+    for old_key, new_path in path_mapping.items():
+        decoded_key = html.unescape(old_key.strip())
+        decoded_key = urllib.parse.unquote(decoded_key)
+        decoded_key = decoded_key.replace("<u>", "/").replace("<c>", "/")
+        bn = Path(decoded_key.replace("\\", "/")).name
         filename_to_new[bn] = new_path
 
     log_fn(f"Rewrite plan: {len(filename_to_new)} filename(s)")
@@ -83,15 +88,17 @@ def update_xlf_references(
         nonlocal rewrite_count
         head, current, tail = match.group(1), match.group(2), match.group(3)
         
-        # Decode FrameMaker's internal <u> and <c> tags to correctly extract the basename
+        # THE FIX: Decode URL entities (like %20 or %C3%A4 for the 'ä' in Gerätebuch)
         decoded = html.unescape(current.strip())
+        decoded = urllib.parse.unquote(decoded)
         decoded = decoded.replace("<u>", "/").replace("<c>", "/")
         decoded = decoded.replace("\\", "/").replace(":", "/")
         parts = [p for p in decoded.split("/") if p]
         bn_current = parts[-1] if parts else decoded
         
+        # THE FIX: Case insensitive matching for maximum safety
         for bn, new_path in filename_to_new.items():
-            if bn_current == bn:
+            if bn_current.lower() == bn.lower():
                 log_fn(f"  ✓ {current!r} → {new_path!r}  (matched {bn!r})")
                 rewrite_count += 1
                 return f"{head}{new_path}{tail}"
@@ -138,7 +145,6 @@ def translate_project(
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # THE FOLDER STRUCTURE FIX: strictly creates a single 'graphics' directory
     deliverable_root = work_dir / f"translated_{target_lang}"
     xlf_out_dir      = deliverable_root / f"translated_{target_lang}"
     graphics_out_dir = deliverable_root / "graphics"
