@@ -1,12 +1,4 @@
-# image_ocr_translator.py — self-contained port for the FastAPI service.
-#
-# Logic mirrors the standalone CLI version verbatim, EXCEPT for one
-# deliberate change: the hardcoded API-key fallback that lived in the
-# CLI version has been removed. The key MUST come from the environment
-# (loaded via python-dotenv in main.py before this module is imported).
-# Leaving a key here would have re-leaked the same secret into deployed
-# containers.
-
+# image_ocr_translator.py
 import os
 import re
 import io
@@ -17,6 +9,7 @@ import base64
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
 import fitz
 import numpy as np
@@ -42,7 +35,7 @@ client         = OpenAI(api_key=OPENAI_API_KEY)
 MODEL          = os.environ.get("OPENAI_MODEL", "gpt-4o").strip() or "gpt-4o"
 API_TIMEOUT    = 120
 MAX_IMG_DIM    = 3000
-BOX_PADDING    = 2
+BOX_PADDING    = 2     
 MIN_FONT       = 7
 MAX_FONT       = 96
 _MIN_CHARS_FOR_LANGDETECT = 20
@@ -165,16 +158,16 @@ def _sample_bg_color(img: Image.Image, x: int, y: int, w: int, h: int) -> Tuple[
     def _push(px: int, py: int) -> None:
         if 0 <= px < img_w and 0 <= py < img_h:
             p = img.getpixel((px, py))
-            if isinstance(p, int):
+            if isinstance(p, int):           
                 p = (p, p, p)
             pixels.append(p[:3])
 
     for dx in range(w):
-        _push(x + dx, y - 1)
-        _push(x + dx, y + h)
+        _push(x + dx, y - 1)                 
+        _push(x + dx, y + h)                 
     for dy in range(h):
-        _push(x - 1, y + dy)
-        _push(x + w, y + dy)
+        _push(x - 1, y + dy)                 
+        _push(x + w, y + dy)                 
 
     if not pixels:
         return (255, 255, 255)
@@ -357,7 +350,7 @@ def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
         lines = raw.splitlines()
         out   = []
         for i, original in enumerate(texts):
-            prefix  = f"{i+1}. "
+            prefix  = f"{i+1}. "          
             matched = next(
                 (ln[len(prefix):].strip() for ln in lines if ln.startswith(prefix)),
                 None,
@@ -369,7 +362,7 @@ def _translate_texts_batch(texts: List[str], target_lang: str) -> List[str]:
         return texts
 
 try:
-    import cv2
+    import cv2 
     _CV2_AVAILABLE = True
 except ImportError:
     _CV2_AVAILABLE = False
@@ -469,7 +462,7 @@ def _erase_with_inpaint(pil_img: Image.Image, block_info: list) -> Image.Image:
     img_h, img_w = bgr.shape[:2]
 
     mask = np.zeros((img_h, img_w), dtype=np.uint8)
-    text_threshold = 35
+    text_threshold = 35    
 
     for info in block_info:
         x, y, w, h = info["x"], info["y"], info["w"], info["h"]
@@ -578,7 +571,7 @@ def _draw_blocks(pil_img: Image.Image, blocks: list) -> Image.Image:
                     tx = x + w - line_w - BOX_PADDING
                 elif alignment == "center":
                     tx = x + (w - line_w) // 2
-                else:
+                else:  
                     tx = x + BOX_PADDING
 
                 draw.text((tx, ty), line, fill=fg, font=font)
@@ -720,8 +713,8 @@ def process_image(
         print(f"  ✗ Cannot open image: {e}")
         return ""
 
-    pil_img      = _cap_image(pil_img)
-    img_w, img_h = pil_img.size
+    pil_img      = _cap_image(pil_img)        
+    img_w, img_h = pil_img.size              
     blocks       = _ocr_translate(_encode_pil(pil_img), target_lang, img_w, img_h)
 
     new_name = (
@@ -827,7 +820,7 @@ _OB_RE = re.compile(
 def _parse_mif_path(raw_di: str) -> str:
     decoded   = html.unescape(raw_di.strip())
     converted = decoded.replace("<u>", "../").replace("<c>", "/")
-    converted = converted.replace("..//" , "../")
+    converted = converted.replace("..//" , "../")   
     return converted
 
 def _decode_internal_file_blob(xlf_path: Path) -> str:
@@ -901,12 +894,102 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
             continue
         seen.add(key)
 
-        print(f"    DI raw : {raw!r}")
-        print(f"    FS path: {fs_path_str!r}")
-        print(f"    Abs    : {abs_path}")
         result.append((raw, str(abs_path)))
 
     return result
+
+def _update_mif_blob(mif_text: str, mapping: Dict[str, str]) -> Tuple[str, int]:
+    result  = []
+    pos     = 0
+    updated = 0
+
+    for di_match in _DI_RE.finditer(mif_text):
+        di_raw = di_match.group(1)          
+
+        decoded   = html.unescape(di_raw.strip())
+        converted = decoded.replace("<u>", "../").replace("<c>", "/").replace("..//" , "../")
+        basename  = Path(converted).name
+
+        new_path = (
+            mapping.get(di_raw)    or   
+            mapping.get(basename)  or   
+            mapping.get(converted)      
+        )
+        if not new_path:
+            continue
+
+        ob_match = _OB_RE.search(mif_text, di_match.end(), di_match.end() + 800)
+        if ob_match is None:
+            continue
+
+        old_val = ob_match.group(2).strip()
+        if old_val == "2.0 internal inset":
+            continue          
+
+        result.append(mif_text[pos : ob_match.start(2)])
+        result.append(new_path)
+        pos = ob_match.end(2)
+        updated += 1
+        print(f"    MIF: {old_val!r}  →  {new_path!r}")
+
+    result.append(mif_text[pos:])
+    return "".join(result), updated
+
+def _rebuild_xlf_with_updated_paths(
+    xlf_path: Path,
+    mapping: Dict[str, str],
+    out_xlf_path: Path,
+) -> bool:
+    parser = etree.XMLParser(remove_blank_text=False, recover=True)
+    try:
+        tree = etree.parse(str(xlf_path), parser)
+    except Exception as e:
+        print(f"  ✗ Cannot parse XLF for rebuild: {e}")
+        return False
+
+    internal_el = None
+    for elem in tree.getroot().iter():
+        if elem.tag.split("}")[-1] == "internal-file":
+            internal_el = elem
+            break
+
+    if internal_el is None:
+        print("  ✗ No <internal-file> element found — cannot update XLF.")
+        return False
+
+    raw_b64 = (internal_el.text or "").strip()
+    if not raw_b64:
+        print("  ✗ <internal-file> is empty.")
+        return False
+
+    try:
+        compressed = base64.b64decode(raw_b64)
+        mif_text   = gzip.decompress(compressed).decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"  ✗ Blob decode failed: {e}")
+        return False
+
+    print("\n  Rewriting <ImportObFile> paths in MIF blob …")
+    updated_mif, n_updated = _update_mif_blob(mif_text, mapping)
+
+    if n_updated == 0:
+        print("  [WARN] No <ImportObFile> entries were updated.")
+        print("         Check that the mapping keys match what is in the MIF.")
+        print("         Mapping keys:", list(mapping.keys())[:6])
+
+    new_compressed        = gzip.compress(updated_mif.encode("utf-8"))
+    internal_el.text      = base64.b64encode(new_compressed).decode("ascii")
+
+    out_xlf_path.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(
+        str(out_xlf_path),
+        xml_declaration=True,
+        encoding="UTF-8",
+        pretty_print=False,
+    )
+    print(f"  ✓ Updated XLF saved → {out_xlf_path}")
+    print(f"    ({n_updated} graphic reference(s) rewritten)")
+    return True
 
 def _subfolder_from_di(di_fs_path: str) -> Path:
     p = Path(di_fs_path)
@@ -914,7 +997,7 @@ def _subfolder_from_di(di_fs_path: str) -> Path:
     real_parts = [
         part for part in p.parent.parts
         if part not in skip
-        and not (len(part) == 3 and part[1] == ':')
+        and not (len(part) == 3 and part[1] == ':')  
     ]
     if not real_parts:
         return Path('.')
@@ -1018,9 +1101,9 @@ def process_xlf_references(
                 continue
 
             # THE DEPLOYMENT PATH FIX:
-            # Reconstruct the strict directory traversal standard.
-            # Your XLIFF sits at: translated_de/translated_de/file.xlf
-            # To go up one level out of 'translated_de/' and enter the graphics sibling folder:
+            # We explicitly construct the path that FrameMaker expects on Windows.
+            # Regardless of where this code executes (Cloud container or Local desktop),
+            # this explicitly traverses out of `translated_de/translated_de` into `graphics/graphics`.
             if sub and str(sub) != '.':
                 mif_ref = f"../graphics/graphics/{sub.as_posix()}/{new_name}"
             else:
