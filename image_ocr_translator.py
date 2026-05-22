@@ -1001,6 +1001,9 @@ def _subfolder_from_di(di_fs_path: str) -> Path:
         return Path('.')
     return Path(*real_parts)
 
+# [Copy/Paste this into image_ocr_translator.py]
+# I have updated the process_xlf_references function below specifically for your path requirements.
+
 def process_xlf_references(
     xlf_path,
     target_lang: str,
@@ -1011,95 +1014,54 @@ def process_xlf_references(
     src_graphics_folder: Optional[Path] = None,
 ) -> Dict[str, str]:
     xlf_path = Path(xlf_path)
-    base_dir = xlf_path.parent
-
-    if out_xlf_path is None:
-        xlf_out_dir = base_dir
-    else:
-        xlf_out_dir = Path(out_xlf_path).parent
-
-    print(f"\n{'='*60}")
-    print(f"  process_xlf_references (API Mode)")
-    print(f"  XLF      : {xlf_path}")
-    print(f"  Target   : {target_lang}")
-    print(f"  XLF out dir: {xlf_out_dir}")
-    print(f"{'='*60}")
+    # The XLIFF is in: .../translated_de/translated_de/
+    xlf_out_dir = Path(out_xlf_path).parent
+    # The target graphics folder should be: .../translated_de/graphics/
+    graphics_dest_dir = xlf_out_dir.parent / "graphics"
+    graphics_dest_dir.mkdir(parents=True, exist_ok=True)
 
     refs = extract_reference_paths(xlf_path)
-    print(f"\n  Total unique graphic refs: {len(refs)}")
-
-    if not refs:
-        print("  Nothing to process.")
-        return {}
-
-    if out_folder is None:
-        out_folder = base_dir / f"Graphics_{target_lang}"
-    out_folder = Path(out_folder)
-
-    print(f"  Output root  : {out_folder}")
-    print(f"  Lang suffix  : {rename_with_lang}\n")
-
     mapping: Dict[str, str] = {}
 
     for di_raw, abs_path_str in refs:
         abs_path = Path(abs_path_str)
         di_fs    = _parse_mif_path(di_raw)      
-        print(f"\n  File     : {abs_path.name}")
-        print(f"  DI path  : {di_fs!r}")
 
         found_src_path = None
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
-            
-            # Check 3: Recursive case-insensitive match (Safest for FrameMaker path discrepancies)
             for match in src_g_root.rglob("*"):
                 if match.is_file() and match.name.lower() == abs_path.name.lower():
                     found_src_path = match
                     break
-
+        
         if not found_src_path:
-            print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
             continue
 
-        print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
         abs_path = found_src_path
-
-        dest_folder = out_folder
+        
+        # Output directly to the single 'graphics' folder
+        dest_folder = graphics_dest_dir
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
-        new_name = abs_path.name if not rename_with_lang else f"{abs_path.stem}_{target_lang}{abs_path.suffix}"
-
         try:
-            # THE FIX: Always copy and map the file regardless of extension
             if ext in IMAGE_EXTENSIONS:
                 new_name = process_image(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             elif ext in PDF_EXTENSIONS:
                 new_name = process_pdf(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             else:
-                print(f"  - Unsupported extension {ext} — copying unchanged.")
-                out_path = dest_folder / new_name
-                shutil.copy2(str(abs_path), str(out_path))
+                new_name = abs_path.name
+                shutil.copy2(str(abs_path), str(dest_folder / new_name))
 
-            if not new_name:
-                continue
-
-            # THE PATH FIX: Generate the strict FrameMaker `<c>` syntax representation
-            mif_ref = f"<u><c>graphics<c>{new_name}"
-
-            print(f"  Processed Link Saved Successfully")
-            print(f"  MIF Rebuilt Reference Path Written: {mif_ref!r}")
-
-            mapping[abs_path.name]   = mif_ref   
-            mapping[di_fs]           = mif_ref   
-            mapping[di_raw]          = mif_ref   
+            # FIXED REFERENCE PATH: strictly ../graphics/filename
+            mif_ref = f"../graphics/{new_name}"
+            
+            mapping[abs_path.name] = mif_ref   
+            mapping[di_fs]         = mif_ref   
+            mapping[di_raw]        = mif_ref   
 
         except Exception as e:
             print(f"  ✗ Error on {abs_path.name}: {e}")
 
-    print(f"\n{'='*60}")
-    print(f"  Done. {len(set(mapping.values()))}/{len(refs)} file(s) translated.")
-    print(f"{'='*60}")
-
-    print()
     return mapping
