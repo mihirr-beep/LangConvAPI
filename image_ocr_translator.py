@@ -40,6 +40,7 @@ MIN_FONT       = 7
 MAX_FONT       = 96
 _MIN_CHARS_FOR_LANGDETECT = 20
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Language maps
 # ─────────────────────────────────────────────────────────────────────────────
@@ -883,10 +884,7 @@ def extract_reference_paths(xlf_path: Path) -> List[Tuple[str, str]]:
         fs_path_str = _parse_mif_path(raw)
         ext         = Path(fs_path_str).suffix.lower()
 
-        if ext not in MEDIA_EXTENSIONS:
-            print(f"    skip (unsupported ext '{ext}'): {fs_path_str!r}")
-            continue
-
+        # REMOVED EXTENSION STRICT CHECK to guarantee every file is mapped
         abs_path = (base_dir / fs_path_str).resolve()
         key      = str(abs_path)
 
@@ -1052,23 +1050,12 @@ def process_xlf_references(
         found_src_path = None
         if src_graphics_folder:
             src_g_root = Path(src_graphics_folder)
-            sub = _subfolder_from_di(di_fs)
             
-            # Check 1: Tree directory structure match (Graphics/Graphics/image.jpg)
-            c1 = src_g_root / sub / abs_path.name
-            if c1.is_file():
-                found_src_path = c1
-            else:
-                # Check 2: Direct match inside root of uploaded archive
-                c2 = src_g_root / abs_path.name
-                if c2.is_file():
-                    found_src_path = c2
-                else:
-                    # Check 3: Recursive fallback match
-                    for match in src_g_root.rglob(abs_path.name):
-                        if match.is_file():
-                            found_src_path = match
-                            break
+            # Check 3: Recursive case-insensitive match (Safest for FrameMaker path discrepancies)
+            for match in src_g_root.rglob("*"):
+                if match.is_file() and match.name.lower() == abs_path.name.lower():
+                    found_src_path = match
+                    break
 
         if not found_src_path:
             print(f"  ✗ Image file not found inside uploaded folder hierarchy: {abs_path.name}")
@@ -1077,33 +1064,28 @@ def process_xlf_references(
         print(f"  ✓ Located image in uploaded Graphics folder -> {found_src_path}")
         abs_path = found_src_path
 
-        # THE FOLDER FLATTENING FIX: Do not append `sub` path from old document.
-        # Save straight into the single generated graphics destination.
         dest_folder = out_folder
         dest_folder.mkdir(parents=True, exist_ok=True)
 
         ext = abs_path.suffix.lower()
+        new_name = abs_path.name if not rename_with_lang else f"{abs_path.stem}_{target_lang}{abs_path.suffix}"
+
         try:
+            # THE FIX: Always copy and map the file regardless of extension
             if ext in IMAGE_EXTENSIONS:
-                new_name = process_image(
-                    abs_path, target_lang, dest_folder,
-                    rename_with_lang=rename_with_lang,
-                )
+                new_name = process_image(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             elif ext in PDF_EXTENSIONS:
-                new_name = process_pdf(
-                    abs_path, target_lang, dest_folder,
-                    rename_with_lang=rename_with_lang,
-                )
+                new_name = process_pdf(abs_path, target_lang, dest_folder, rename_with_lang=rename_with_lang)
             else:
-                print(f"  - Unsupported extension {ext} — skipping.")
-                continue
+                print(f"  - Unsupported extension {ext} — copying unchanged.")
+                out_path = dest_folder / new_name
+                shutil.copy2(str(abs_path), str(out_path))
 
             if not new_name:
                 continue
 
-            # THE DEPLOYMENT PATH FIX:
-            # We strictly point to the single flattened graphics folder
-            mif_ref = f"../graphics/{new_name}"
+            # THE PATH FIX: Generate the strict FrameMaker `<c>` syntax representation
+            mif_ref = f"<u><c>graphics<c>{new_name}"
 
             print(f"  Processed Link Saved Successfully")
             print(f"  MIF Rebuilt Reference Path Written: {mif_ref!r}")
